@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: "postgres:17.2"
+    shm_size: 128mb
+    environment:
+      - "POSTGRES_DB=mydb"
+      - "POSTGRES_USER=user"
+      - "POSTGRES_PASSWORD=password"
+    ports:
+      - "5432:5432"
+    volumes:
+      - "postgres-data:/var/lib/postgres"
+
+volumes:
+  postgres-data:
