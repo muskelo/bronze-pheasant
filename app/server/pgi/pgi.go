@@ -2,7 +2,6 @@ package pgi
 
 import (
 	"context"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -86,37 +85,7 @@ func (pgi *PostgresInterface) GetNodeWithinFile(ctx context.Context, uuid string
 	return result, err
 }
 
-// ===========================================================================
-// GetNodesWithinFile
-// ---------------------------------------------------------------------------
-const getNodesWithinFileSQL = `
-SELECT node.name, node.advertise_addr
-FROM node JOIN node_file ON node.id=node_file.node_id
-WHERE node_file.file_id=$1;
-`
 
-type getNodesWithinFileResult struct {
-	Name          string
-	AdvertiseAddr string
-}
-
-func (pgi *PostgresInterface) GetNodesWithinFile(ctx context.Context, id int64) ([]getNodesWithinFileResult, error) {
-	results := []getNodesWithinFileResult{}
-	rows, err := pgi.pool.Query(ctx, getNodesWithinFileSQL, id)
-	if err != nil {
-		return results, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		result := getNodesWithinFileResult{}
-		err := rows.Scan(&result.Name, &result.AdvertiseAddr)
-		if err != nil {
-			return results, err
-		}
-		results = append(results, result)
-	}
-	return results, nil
-}
 
 // ===========================================================================
 // UpdateNodeAdvertiseAddr
@@ -143,113 +112,4 @@ func (pgi *PostgresInterface) AddFileToNode(ctx context.Context, node_id int64, 
 	return err
 }
 
-//===========================================================================
-// CreateFile
-//---------------------------------------------------------------------------
 
-type createFileResult struct {
-	ID         int64
-	UUID       string
-	Created_at int64
-	Size       int64
-}
-
-const createFileSQL = `
-INSERT INTO public.file
-("uuid", created_at, "size")
-VALUES($1, $2, $3)
-RETURNING id, uuid, size, created_at;
-`
-
-func (pgi *PostgresInterface) CreateFile(ctx context.Context, uuid string, size int64) (createFileResult, error) {
-	result := createFileResult{}
-
-	err := pgi.pool.QueryRow(ctx, createFileSQL, uuid, time.Now().Unix(), size).
-		Scan(
-			&result.ID,
-			&result.UUID,
-			&result.Size,
-			&result.Created_at,
-		)
-	return result, err
-}
-
-//===========================================================================
-// ReadFile
-//---------------------------------------------------------------------------
-
-type getFileResult struct {
-	id         int64
-	uuid       string
-	created_at int64
-	size       int64
-}
-
-const getFileSQL = `SELECT id, uuid, size, created_at FROM file WHERE uuid=$1`
-
-func (pgi *PostgresInterface) GetFile(ctx context.Context, uuid string) (getFileResult, error) {
-	result := getFileResult{}
-	err := pgi.pool.QueryRow(ctx, getFileSQL, uuid).
-		Scan(
-			&result.id,
-			&result.uuid,
-			&result.size,
-			&result.created_at,
-		)
-
-	return result, err
-}
-
-//===========================================================================
-// GetNotSyncedFiles
-//---------------------------------------------------------------------------
-
-const getNotSyncedFilesSQL = `
-SELECT file.id, file."uuid" 
-FROM file 
-LEFT JOIN (
-		SELECT file_id 
-		FROM node_file
-		WHERE node_id=$1
-	) AS v
-ON file.id=v.file_id
-WHERE v.file_id IS NULL;
-`
-
-type getNotSyncedFilesResult struct {
-	ID   int64
-	UUID string
-}
-
-func (pgi *PostgresInterface) GetNotSyncedFiles(ctx context.Context, nodeID int64) ([]getNotSyncedFilesResult, error) {
-	results := []getNotSyncedFilesResult{}
-	rows, err := pgi.pool.Query(ctx, getNotSyncedFilesSQL, nodeID)
-	if err != nil {
-		return results, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		result := getNotSyncedFilesResult{}
-		err := rows.Scan(&result.ID, &result.UUID)
-		if err != nil {
-			return results, err
-		}
-		results = append(results, result)
-	}
-	return results, nil
-}
-
-//===========================================================================
-// GetNotSyncedFiles
-//---------------------------------------------------------------------------
-
-const updateFileSizeSQL = `
-UPDATE file 
-SET size=$2
-WHERE file.id=$1
-`
-
-func (pgi *PostgresInterface) UpdateFileSize(ctx context.Context, fileID int64, size int64) error {
-	_, err := pgi.pool.Exec(ctx, updateFileSizeSQL, fileID, size)
-	return err
-}

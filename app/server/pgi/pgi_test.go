@@ -88,7 +88,7 @@ func TestPostgresInterface(t *testing.T) {
 			_, err := pgi.CreateFile(context.Background(), uuid, size)
 			require.NoError(t, err, "Must creat row if table file")
 
-			result, err := pgi.GetFile(context.Background(), uuid)
+			result, err := pgi.GetFileByUUID(context.Background(), uuid)
 			require.NoError(t, err, "Must read row if table file")
 			require.Equal(t, uuid, result.uuid, "Result must container original uuid")
 			require.Equal(t, size, result.size, "Result must container original size")
