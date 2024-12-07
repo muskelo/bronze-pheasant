@@ -2,6 +2,7 @@ package pgi
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -25,44 +26,8 @@ func (pgi *PostgresInterface) Ping(ctx context.Context) error {
 	return pgi.pool.Ping(ctx)
 }
 
-//===========================================================================
-// CreateNode
-//---------------------------------------------------------------------------
 
-const createNodeSQL = `
-INSERT INTO public.node
-("name")
-VALUES($1)
-RETURNING id, name;
-`
 
-type createNodeResult struct {
-	ID   int64
-	Name string
-}
-
-func (pgi *PostgresInterface) CreateNode(ctx context.Context, name string) (createNodeResult, error) {
-	result := createNodeResult{}
-	err := pgi.pool.QueryRow(ctx, createNodeSQL, name).Scan(&result.ID, &result.Name)
-	return result, err
-}
-
-//===========================================================================
-// GetNodeByName
-//---------------------------------------------------------------------------
-
-const getNodeByNameSQL = `SELECT id, name from public.node WHERE name=$1`
-
-type getNodeByNameResult struct {
-	ID   int64
-	Name string
-}
-
-func (pgi *PostgresInterface) GetNodeByName(ctx context.Context, name string) (getNodeByNameResult, error) {
-	result := getNodeByNameResult{}
-	err := pgi.pool.QueryRow(ctx, getNodeByNameSQL, name).Scan(&result.ID, &result.Name)
-	return result, err
-}
 
 //===========================================================================
 // GetNodesWithinFile
@@ -93,8 +58,14 @@ func (pgi *PostgresInterface) GetNodeWithinFile(ctx context.Context, uuid string
 const updateNodeAdvertiseAddrSQL = `UPDATE public.node SET advertise_addr=$1 WHERE id=$2`
 
 func (pgi *PostgresInterface) UpdateNodeAdvertiseAddr(ctx context.Context, nodeID int64, advertiseAddr string) error {
-	_, err := pgi.pool.Exec(ctx, updateNodeAdvertiseAddrSQL, advertiseAddr, nodeID)
-	return err
+	commandTag, err := pgi.pool.Exec(ctx, updateNodeAdvertiseAddrSQL, advertiseAddr, nodeID)
+	if err != nil {
+        return err
+    }
+    if commandTag.RowsAffected() != 1 {
+        return fmt.Errorf("Advertise addr not updated (%v)\n", commandTag.RowsAffected())
+    }
+    return nil
 }
 
 //===========================================================================

@@ -2,8 +2,10 @@ package pgi
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	uuidp "github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -32,7 +34,7 @@ func TestPostgresInterface(t *testing.T) {
 		testID := 0
 		t.Logf("\tTest %d:\tTest CreateNode", testID)
 		{
-			name := "my-node-1"
+            name := fmt.Sprintf("my-node-%v", testID)
 			result, err := pgi.CreateNode(context.Background(), name)
 			require.NoError(t, err, "Must creat row if table")
 			require.Equal(t, name, result.Name, "Result must container original name")
@@ -42,7 +44,7 @@ func TestPostgresInterface(t *testing.T) {
 		testID++
 		t.Logf("\tTest %d:\tTest GetNodeByName", testID)
 		{
-			name := "my-node-2"
+            name := fmt.Sprintf("my-node-%v", testID)
 			createResult, err := pgi.CreateNode(context.Background(), name)
 			require.NoError(t, err, "Must creat row if table node")
 
@@ -54,14 +56,27 @@ func TestPostgresInterface(t *testing.T) {
 		testID++
 		t.Logf("\tTest %d:\tTest UpdateNodeAdvertiseAddr", testID)
 		{
-			name := "my-node-3"
-
+            name := fmt.Sprintf("my-node-%v", testID)
 			createResult, err := pgi.CreateNode(context.Background(), name)
 			require.NoError(t, err, "Must creat row if table node")
 
 			err = pgi.UpdateNodeAdvertiseAddr(context.Background(), createResult.ID, "127.0.0.1:9090")
 			require.NoError(t, err, "Must update row if table node")
 		}
+
+		testID++
+		t.Logf("\tTest %d:\tTest InitNodeLock", testID)
+        {
+            name := fmt.Sprintf("my-node-%v", testID)
+			createdNode, err := pgi.CreateNode(context.Background(), name)
+			require.NoError(t, err, "Must creat row if table node")
+
+            timeBeforeLock := time.Now().Unix()
+            updateNode, err := pgi.InitNodeLock(context.Background(), createdNode.ID)
+			require.NoError(t, err, "Must update row if table node")
+            require.GreaterOrEqual(t, updateNode.Lock, timeBeforeLock, "Lock must be grater")
+            require.GreaterOrEqual(t, updateNode.Lock, time.Now().Unix(), "Lock must be lower")
+        }
 	}
 
 	t.Log("Test File methods")
@@ -90,8 +105,8 @@ func TestPostgresInterface(t *testing.T) {
 
 			result, err := pgi.GetFileByUUID(context.Background(), uuid)
 			require.NoError(t, err, "Must read row if table file")
-			require.Equal(t, uuid, result.uuid, "Result must container original uuid")
-			require.Equal(t, size, result.size, "Result must container original size")
+			require.Equal(t, uuid, result.UUID, "Result must container original uuid")
+			require.Equal(t, size, result.Size, "Result must container original size")
 		}
 	}
 }

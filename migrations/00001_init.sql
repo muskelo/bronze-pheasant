@@ -3,15 +3,18 @@
 CREATE TABLE public.file (
 	id bigserial NOT NULL,
 	"uuid" uuid NOT NULL,
-	"size" int8 NULL,
-	created_at int8 NULL,
-	deleted_at int8 NULL,
+	"size" int8 DEFAULT 0 NOT NULL,
+	created_at int8 DEFAULT 0 NOT NULL,
+	deleted_at int8 DEFAULT 0 NOT NULL,
+	state int8 DEFAULT 0 NOT NULL,
 	CONSTRAINT file_pk PRIMARY KEY (id),
 	CONSTRAINT file_uuid_unique UNIQUE (uuid)
 );
 CREATE TABLE public.node (
 	id bigserial NOT NULL,
 	"name" varchar NOT NULL,
+	advertise_addr varchar DEFAULT '' NOT NULL,
+	"lock" int8 DEFAULT 0 NOT NULL,
 	CONSTRAINT node_name_unique UNIQUE (name),
 	CONSTRAINT node_pk PRIMARY KEY (id)
 );
