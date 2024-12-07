@@ -12,11 +12,17 @@ import (
 	"github.com/jackc/pgx/v5"
 	pgip "github.com/muskelo/bronze-pheasant/app/server/pgi"
 	storagep "github.com/muskelo/bronze-pheasant/app/server/storage"
-	log "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 )
 
-func NewRouter(nodeID int64, storage *storagep.Storage, pgi *pgip.PostgresInterface) *gin.Engine {
-	router := gin.Default()
+func NewRouter(
+	nodeID int64,
+	storage *storagep.Storage,
+	pgi *pgip.PostgresInterface,
+) *gin.Engine {
+	router := gin.New()
+
+	router.Use(Logger(), gin.Recovery())
 
 	router.POST("/api/v1/files/:uuid", uploadFile(nodeID, storage, pgi))
 
@@ -61,7 +67,7 @@ func uploadFile(nodeID int64, storage *storagep.Storage, pgi *pgip.PostgresInter
 			return
 		}
 
-        // create file in postgresql
+		// create file in postgresql
 		file, err := pgi.CreateFile(ctx, uuid, 0)
 		if err != nil {
 			resp.Err = fmt.Sprintf("Failed create file in postgres: %v\n", err)
@@ -70,7 +76,7 @@ func uploadFile(nodeID int64, storage *storagep.Storage, pgi *pgip.PostgresInter
 		}
 
 		// Write file on disk
-        size, err := storage.WriteFile(uuid, part)
+		size, err := storage.WriteFile(uuid, part)
 		if err == os.ErrExist {
 			resp.Err = "File already exist on disk"
 			ctx.JSON(409, resp)
@@ -82,19 +88,19 @@ func uploadFile(nodeID int64, storage *storagep.Storage, pgi *pgip.PostgresInter
 			return
 		}
 
-        // Update info about file in postgres
-        file, err = pgi.UpdateFile(ctx, file.ID, 1, size)
-        if err != nil {
+		// Update info about file in postgres
+		file, err = pgi.UpdateFile(ctx, file.ID, 1, size)
+		if err != nil {
 			resp.Err = fmt.Sprintf("Failed udpate file: %v\n", err)
 			ctx.JSON(500, resp)
-            return
-        }
+			return
+		}
 		err = pgi.AddFileToNode(ctx, nodeID, file.ID)
-        if err != nil {
+		if err != nil {
 			resp.Err = fmt.Sprintf("Failed add file to node: %v\n", err)
 			ctx.JSON(500, resp)
 			return
-        }
+		}
 
 		// Send response
 		resp.ID = file.ID
@@ -111,47 +117,47 @@ func downloadFile(storage *storagep.Storage, pgi *pgip.PostgresInterface) gin.Ha
 			ctx.Status(400)
 			return
 		}
-        if storage.IsFileExist(uuid){
-            size := storage.GetFileSize(uuid)
-            file, err := storage.GetFile(uuid)
-            if err != nil {
-                ctx.Status(500)
-                return
-            }
-            ctx.DataFromReader(200, size, "application/octet-stream", file, nil)
-            return
-        }
+		if storage.IsFileExist(uuid) {
+			size := storage.GetFileSize(uuid)
+			file, err := storage.GetFile(uuid)
+			if err != nil {
+				ctx.Status(500)
+				return
+			}
+			ctx.DataFromReader(200, size, "application/octet-stream", file, nil)
+			return
+		}
 
-        file, err := pgi.GetFileByUUIDAndState(ctx, uuid, 1)
-        if errors.Is(err, pgx.ErrNoRows){
-            ctx.Status(404)
-            return
-        }
-        if err != nil {
-            log.Errorf(err.Error())
-            ctx.Status(500)
-            return
-        }
+		file, err := pgi.GetFileByUUIDAndState(ctx, uuid, 1)
+		if errors.Is(err, pgx.ErrNoRows) {
+			ctx.Status(404)
+			return
+		}
+		if err != nil {
+			logrus.Errorf(err.Error())
+			ctx.Status(500)
+			return
+		}
 
-        nodes, err := pgi.GetNodesWithinFile(ctx, file.ID)
-        if err != nil {
-            log.Errorf(err.Error())
-            ctx.Status(500)
-            return
-        }
+		nodes, err := pgi.GetNodesWithinFile(ctx, file.ID)
+		if err != nil {
+			logrus.Errorf(err.Error())
+			ctx.Status(500)
+			return
+		}
 
-        for _, node := range nodes {
-            resp, err := http.Get(fmt.Sprintf("%v/api/v1/files/%v", node.AdvertiseAddr, uuid))
-            if err == nil {
-                ctx.DataFromReader(200, resp.ContentLength, "application/octet-stream", resp.Body, nil)
-                return
-            } else {
-                log.Error(err.Error())
-            }
-        }
-        log.Error("Failed proxy request")
-        ctx.Status(500)
-        return
+		for _, node := range nodes {
+			resp, err := http.Get(fmt.Sprintf("%v/api/v1/files/%v", node.AdvertiseAddr, uuid))
+			if err == nil {
+				ctx.DataFromReader(200, resp.ContentLength, "application/octet-stream", resp.Body, nil)
+				return
+			} else {
+				logrus.Error(err.Error())
+			}
+		}
+		logrus.Error("Failed proxy request")
+		ctx.Status(500)
+		return
 	}
 }
 

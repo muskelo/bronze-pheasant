@@ -11,10 +11,9 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/muskelo/bronze-pheasant/app/server/httpapi"
+	"github.com/muskelo/bronze-pheasant/app/server/log"
 	pgip "github.com/muskelo/bronze-pheasant/app/server/pgi"
 	"github.com/muskelo/bronze-pheasant/app/server/pglock"
 	storagep "github.com/muskelo/bronze-pheasant/app/server/storage"
@@ -29,121 +28,127 @@ var (
 	postgresURL    = kingpin.Flag("postgres-url", "Postgres connstring").Required().String()
 )
 
+// var log = logrus.New()
+
+// func log.Logg(goroutine string) *logrus.Entry {
+// 	return log.WithField("goroutine", goroutine)
+// }
+
 func run(ctx context.Context) int {
 	kingpin.Parse()
 
 	g, ctx := errgroup.WithContext(ctx)
 
-	log.Info("[Main] Create postgres interface")
+	log.Logg("main").Info("Create postgres interface")
 	pgi, err := pgip.New(context.Background(), *postgresURL)
 	if err != nil {
-		log.Errorf("[Main] Failed create postgres interface: %v\n", err)
+		log.Logg("main").Errorf("Failed create postgres interface: %v\n", err)
 		return 1
 	}
 	defer func() {
-		log.Print("[Defer] close postgres interface")
+		log.Logg("main").Print("Defer close postgres interface")
 		pgi.Close()
 	}()
 
-	log.Info("[Main] Start 'Pgping' goroutine")
+	log.Logg("main").Info("Start 'pgping' goroutine")
 	g.Go(func() error {
-		log.Print("[Pgping] Start postgres ping loop")
+		log.Logg("pgping").Print("Start postgres ping loop")
 		for {
 			err := pgi.Ping(ctx)
 			if err != nil {
-				log.Printf("[Pgping] Stop postgres ping loop (%v)", err)
+				log.Logg("pgping").Printf("Stop postgres ping loop (%v)", err)
 				return err
 			}
 			time.Sleep(time.Second * 5)
 		}
 	})
 
-	log.Info("[Main] Providing node")
+	log.Logg("main").Info("Providing node")
 	node, err := pgi.GetNodeByName(ctx, *name)
 	if err != nil {
-		log.Errorf("[Main] Failed get node: %v\n", err)
+		log.Logg("main").Errorf("Failed get node: %v\n", err)
 		return 1
 	}
 	if !node.IsExist() {
 		node, err = pgi.CreateNode(ctx, *name)
 		if err != nil {
-			log.Errorf("[Main] Failed create node: %v\n", err)
+			log.Logg("main").Errorf("Failed create node: %v\n", err)
 			return 1
 		}
 	}
 
-	log.Info("[Main] Taking lock")
+	log.Logg("main").Info("Taking lock")
 	lock := pglock.NewLock(node.ID, pgi)
 	err = lock.TakeWithTimeout(ctx, 10*time.Second)
 	if err != nil {
-		log.Errorf("[Main] Failed take lock: %v\n", err)
+		log.Logg("main").Errorf("Failed take lock: %v\n", err)
 		return 1
 	}
 
 	defer func() {
-		log.Info("[Defer] Release lock")
+		log.Logg("main").Info("Defer Release lock")
 		err := lock.ReleaseWithTimeout(context.Background(), 10*time.Second)
 		if err != nil {
-			log.Errorf("[Defer] Failed Release lock")
+			log.Logg("main").Errorf("Defer Failed Release lock")
 		}
 	}()
 
-	log.Info("[Main] Start 'Lock' goroutine")
+	log.Logg("main").Info("Start 'lock' goroutine")
 	g.Go(func() error {
-		log.Printf("[Lock] Start keeping\n")
+		log.Logg("lock").Printf("Start keeping\n")
 		err := lock.Keep(ctx, 30*time.Second, 10*time.Second)
-		log.Printf("[Lock] Stop keeping(%v)\n", err)
+		log.Logg("lock").Printf("Stop keeping(%v)\n", err)
 		return err
 	})
 
-	log.Info("[Main] Update advertise addres")
+	log.Logg("main").Info("Update advertise addres")
 	err = pgi.UpdateNodeAdvertiseAddr(ctx, node.ID, *advertiseAddr)
 	if err != nil {
-		log.Errorf("[Main] Failed update advertise addres in postgres: %v\n", err)
+		log.Logg("main").Errorf("Failed update advertise addres in postgres: %v\n", err)
 		return 1
 	}
 
-	log.Info("[Main] Create storage")
+	log.Logg("main").Info("Create storage")
 	storage, err := storagep.NewStorage(*storageWorkdir)
 	if err != nil {
-		log.Fatalf("[Main] Failed create storage: %v\n", err)
+		log.Logg("main").Fatalf("Failed create storage: %v\n", err)
 	}
 
-	log.Printf("[Main] Create http server")
+	log.Logg("main").Printf("Create http server")
 	httpServer := &http.Server{
 		Addr:    *apiListen,
 		Handler: httpapi.NewRouter(node.ID, storage, pgi).Handler(),
 	}
 
-	log.Print("[Main] Start HttpServer goroutines")
+	log.Logg("main").Print("Start 'httpserver' goroutines")
 	g.Go(func() error {
-		log.Printf("[HttpServer] Start listen and serve on %s\n", httpServer.Addr)
+		log.Logg("httpserver").Printf("Start listen and serve on %s\n", httpServer.Addr)
 		err := httpServer.ListenAndServe()
 		if errors.Is(err, http.ErrServerClosed) {
 			err = nil
 		}
-		log.Printf("[HttpServer] Stop lient and serve on %s (%v)\n", httpServer.Addr, err)
+		log.Logg("httpserver").Printf("Stop lient and serve on %s (%v)\n", httpServer.Addr, err)
 		return err
 	})
 	g.Go(func() error {
 		<-ctx.Done()
-		log.Printf("[HttpServer] Shutdown signal")
+		log.Logg("httpserver").Printf("Shutdown signal")
 		return httpServer.Shutdown(ctx)
 	})
 
-	log.Print("[Main] Create syncmanager")
+	log.Logg("main").Print("Create syncmanager")
 	syncmanager := syncm.New(pgi, storage, node.ID)
 
-	log.Print("[Main] Start 'Syncmanager' goroutine")
+	log.Logg("main").Print("Start 'syncmanager' goroutine")
 	g.Go(func() error {
-		log.Print("[Syncmanager] Start")
+		log.Logg("syncmanager").Print("Start")
 		err := syncmanager.Run(ctx)
-		log.Printf("[Syncmanager] Stop (%v)", err)
+		log.Logg("syncmanager").Printf("Stop (%v)", err)
 		return err
 	})
 
 	if err := g.Wait(); err != nil {
-		log.Printf("[Main] %s \n", err)
+		log.Logg("main").Printf("%s \n", err)
 	}
 	return 0
 }

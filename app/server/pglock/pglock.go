@@ -28,25 +28,26 @@ func (l *Lock) Take(ctx context.Context) error {
 	l.mutext.Lock()
 	defer l.mutext.Unlock()
 
-    lock := time.Now().Unix()
-    err := l.pgi.TakeNodeLock(ctx, l.nodeId, lock)
-    if err == nil {
-        l.lock = lock
-    }
-    return err
+	lock := time.Now().Unix()
+	err := l.pgi.TakeNodeLock(ctx, l.nodeId, lock)
+	if err == nil {
+		l.lock = lock
+	}
+	return err
 }
 
 func (l *Lock) TakeWithTimeout(ctx context.Context, timeout time.Duration) error {
+	ctx, _ = context.WithTimeout(ctx, timeout)
 	errc := make(chan error, 1)
-	go func() {
+	go func(ctx context.Context) {
 		errc <- l.Take(ctx)
-	}()
+	}(ctx)
 
 	select {
-	case <-time.After(timeout):
+	case err := <-errc:
+		return err
+	case <-ctx.Done():
 		return fmt.Errorf("Timeout take lock")
-	case result := <-errc:
-		return result
 	}
 }
 
@@ -54,24 +55,25 @@ func (l *Lock) Release(ctx context.Context) error {
 	l.mutext.Lock()
 	defer l.mutext.Unlock()
 
-    err := l.pgi.ReleaseNodeLock(ctx, l.nodeId, l.lock)
-    if err == nil {
-        l.lock = 0
-    }
-    return err
+	err := l.pgi.ReleaseNodeLock(ctx, l.nodeId, l.lock)
+	if err == nil {
+		l.lock = 0
+	}
+	return err
 }
 
 func (l *Lock) ReleaseWithTimeout(ctx context.Context, timeout time.Duration) error {
+	ctx, _ = context.WithTimeout(ctx, timeout)
 	errc := make(chan error, 1)
 	go func() {
 		errc <- l.Release(ctx)
 	}()
 
 	select {
-	case <-time.After(timeout):
+	case <-ctx.Done():
 		return fmt.Errorf("Timeout release lock")
-	case result := <-errc:
-		return result
+	case err := <-errc:
+		return err
 	}
 }
 
@@ -80,25 +82,26 @@ func (l *Lock) Update(ctx context.Context) error {
 	defer l.mutext.Unlock()
 
 	oldLock := l.lock
-    newLock := time.Now().Unix() 
-    err := l.pgi.UpdateNodeLock(ctx, l.nodeId, oldLock, newLock)
-    if err == nil {
-        l.lock = newLock
-    }
-    return err
+	newLock := time.Now().Unix()
+	err := l.pgi.UpdateNodeLock(ctx, l.nodeId, oldLock, newLock)
+	if err == nil {
+		l.lock = newLock
+	}
+	return err
 }
 
 func (l *Lock) UpdateWithTimeout(ctx context.Context, timeout time.Duration) error {
+	ctx, _ = context.WithTimeout(ctx, timeout)
 	errc := make(chan error, 1)
 	go func() {
 		errc <- l.Update(ctx)
 	}()
 
 	select {
-	case <-time.After(timeout):
+	case <-ctx.Done():
 		return fmt.Errorf("Timeout update lock")
-	case result := <-errc:
-		return result
+	case err := <-errc:
+		return err
 	}
 }
 
@@ -122,5 +125,3 @@ func (l *Lock) Keep(ctx context.Context, interval time.Duration, timeout time.Du
 		}
 	}
 }
-
-
