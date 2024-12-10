@@ -6,22 +6,29 @@ import (
 	"sync"
 	"time"
 
-	pgip "github.com/muskelo/bronze-pheasant/app/server/pgi"
+	"github.com/muskelo/bronze-pheasant/app/server/postgres"
 )
 
-func NewLock(nodeId int64, pgi *pgip.PostgresInterface) *Lock {
-	return &Lock{
-		nodeId: nodeId,
-		pgi:    pgi,
-	}
-}
-
 type Lock struct {
-	nodeId int64
-	pgi    *pgip.PostgresInterface
+	nodeID int64
+	pg     *postgres.Postgres
 
 	lock   int64
 	mutext sync.Mutex
+    initialized bool
+}
+
+func (l *Lock) Init(nodeID int64, pg *postgres.Postgres) {
+    if l.initialized {
+        panic("Try reinit lock")
+    }
+    l.nodeID = nodeID
+    l.pg = pg
+    l.initialized = true
+}
+
+func (l *Lock) Get() int64 {
+	return l.lock
 }
 
 func (l *Lock) Take(ctx context.Context) error {
@@ -29,7 +36,7 @@ func (l *Lock) Take(ctx context.Context) error {
 	defer l.mutext.Unlock()
 
 	lock := time.Now().Unix()
-	err := l.pgi.TakeNodeLock(ctx, l.nodeId, lock)
+	err := l.pg.TakeNodeLock(ctx, l.nodeID, lock)
 	if err == nil {
 		l.lock = lock
 	}
@@ -55,7 +62,7 @@ func (l *Lock) Release(ctx context.Context) error {
 	l.mutext.Lock()
 	defer l.mutext.Unlock()
 
-	err := l.pgi.ReleaseNodeLock(ctx, l.nodeId, l.lock)
+	err := l.pg.ReleaseNodeLock(ctx, l.nodeID, l.lock)
 	if err == nil {
 		l.lock = 0
 	}
@@ -83,7 +90,7 @@ func (l *Lock) Update(ctx context.Context) error {
 
 	oldLock := l.lock
 	newLock := time.Now().Unix()
-	err := l.pgi.UpdateNodeLock(ctx, l.nodeId, oldLock, newLock)
+	err := l.pg.UpdateNodeLock(ctx, l.nodeID, oldLock, newLock)
 	if err == nil {
 		l.lock = newLock
 	}
@@ -124,4 +131,8 @@ func (l *Lock) Keep(ctx context.Context, interval time.Duration, timeout time.Du
 		case <-time.After(time.Duration(restTime) * time.Second):
 		}
 	}
+}
+
+func (l *Lock) IsFresh() bool {
+	return (time.Now().Unix() - l.lock) < 45
 }

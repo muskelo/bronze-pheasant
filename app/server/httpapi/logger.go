@@ -11,9 +11,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-var timeFormat = "02/Jan/2006:15:04:05 -0700"
-
-// Logger is the logrus logger handler
 func Logger(notLogged ...string) gin.HandlerFunc {
 	var skip map[string]struct{}
 
@@ -44,7 +41,7 @@ func Logger(notLogged ...string) gin.HandlerFunc {
 			return
 		}
 
-		entry := log.Logg("httpserver").WithFields(logrus.Fields{
+		entry := log.G("httpserver").WithFields(logrus.Fields{
 			"statusCode": statusCode,
 			"latency":    latency, // time to process
 			"clientIP":   clientIP,

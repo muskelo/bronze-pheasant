@@ -10,7 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	uuidp "github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	pgip "github.com/muskelo/bronze-pheasant/app/server/pgi"
+	"github.com/muskelo/bronze-pheasant/app/server/postgres"
 	storagep "github.com/muskelo/bronze-pheasant/app/server/storage"
 	"github.com/sirupsen/logrus"
 )
@@ -18,20 +18,19 @@ import (
 func NewRouter(
 	nodeID int64,
 	storage *storagep.Storage,
-	pgi *pgip.PostgresInterface,
+	pg *postgres.Postgres,
 ) *gin.Engine {
-	router := gin.New()
 
+	router := gin.New()
 	router.Use(Logger(), gin.Recovery())
 
-	router.POST("/api/v1/files/:uuid", uploadFile(nodeID, storage, pgi))
-
-	router.GET("/api/v1/files/:uuid", downloadFile(storage, pgi))
+	router.POST("/api/v1/files/:uuid", uploadFile(nodeID, storage, pg))
+	router.GET("/api/v1/files/:uuid", downloadFile(storage, pg))
 
 	return router
 }
 
-func uploadFile(nodeID int64, storage *storagep.Storage, pgi *pgip.PostgresInterface) gin.HandlerFunc {
+func uploadFile(nodeID int64, storage *storagep.Storage, pg *postgres.Postgres) gin.HandlerFunc {
 	type response struct {
 		Err       string `json:"err"`
 		ID        int64  `json:"id"`
@@ -68,7 +67,7 @@ func uploadFile(nodeID int64, storage *storagep.Storage, pgi *pgip.PostgresInter
 		}
 
 		// create file in postgresql
-		file, err := pgi.CreateFile(ctx, uuid, 0)
+		file, err := pg.CreateFile(ctx, uuid, 0)
 		if err != nil {
 			resp.Err = fmt.Sprintf("Failed create file in postgres: %v\n", err)
 			ctx.JSON(500, resp)
@@ -89,15 +88,15 @@ func uploadFile(nodeID int64, storage *storagep.Storage, pgi *pgip.PostgresInter
 		}
 
 		// Update info about file in postgres
-		file, err = pgi.UpdateFile(ctx, file.ID, 1, size)
+		err = pg.AddFileToNode(ctx, nodeID, file.ID)
 		if err != nil {
-			resp.Err = fmt.Sprintf("Failed udpate file: %v\n", err)
+			resp.Err = fmt.Sprintf("Failed add file to node: %v\n", err)
 			ctx.JSON(500, resp)
 			return
 		}
-		err = pgi.AddFileToNode(ctx, nodeID, file.ID)
+		file, err = pg.UpdateFile(ctx, file.ID, 1, size)
 		if err != nil {
-			resp.Err = fmt.Sprintf("Failed add file to node: %v\n", err)
+			resp.Err = fmt.Sprintf("Failed udpate file: %v\n", err)
 			ctx.JSON(500, resp)
 			return
 		}
@@ -110,7 +109,7 @@ func uploadFile(nodeID int64, storage *storagep.Storage, pgi *pgip.PostgresInter
 	}
 }
 
-func downloadFile(storage *storagep.Storage, pgi *pgip.PostgresInterface) gin.HandlerFunc {
+func downloadFile(storage *storagep.Storage, pg *postgres.Postgres) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		uuid := ctx.Param("uuid")
 		if !IsValidUUID(uuid) {
@@ -128,7 +127,7 @@ func downloadFile(storage *storagep.Storage, pgi *pgip.PostgresInterface) gin.Ha
 			return
 		}
 
-		file, err := pgi.GetFileByUUIDAndState(ctx, uuid, 1)
+		file, err := pg.GetFileByUUIDAndState(ctx, uuid, 1)
 		if errors.Is(err, pgx.ErrNoRows) {
 			ctx.Status(404)
 			return
@@ -139,7 +138,7 @@ func downloadFile(storage *storagep.Storage, pgi *pgip.PostgresInterface) gin.Ha
 			return
 		}
 
-		nodes, err := pgi.GetNodesWithinFile(ctx, file.ID)
+		nodes, err := pg.GetNodesWithinFile(ctx, file.ID)
 		if err != nil {
 			logrus.Errorf(err.Error())
 			ctx.Status(500)

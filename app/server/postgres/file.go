@@ -1,8 +1,9 @@
-package pgi
+package postgres
 
 import (
 	"context"
 	"time"
+	locklib "github.com/muskelo/bronze-pheasant/lib/lock"
 )
 
 // Default result
@@ -21,10 +22,12 @@ VALUES($1, $2, $3, $4)
 RETURNING id, uuid, state, size, created_at;
 `
 
-func (pgi *PostgresInterface) CreateFile(ctx context.Context, uuid string, size int64) (File, error) {
+func (pg *Postgres) CreateFile(ctx context.Context, uuid string, size int64) (File, error) {
 	result := File{}
-
-	err := pgi.pool.QueryRow(ctx, createFileSQL, uuid, 0, size, time.Now().Unix()).
+	if !pg.lock.IsFresh() {
+		return result, locklib.ErrLockExpired
+	}
+	err := pg.pool.QueryRow(ctx, createFileSQL, uuid, 0, size, time.Now().Unix()).
 		Scan(
 			&result.ID,
 			&result.UUID,
@@ -42,10 +45,12 @@ WHERE id=$1
 RETURNING id, uuid, state, size, created_at;
 `
 
-func (pgi *PostgresInterface) UpdateFile(ctx context.Context, id int64, state int64, size int64) (File, error) {
+func (pg *Postgres) UpdateFile(ctx context.Context, id int64, state int64, size int64) (File, error) {
 	result := File{}
-
-	err := pgi.pool.QueryRow(ctx, updateFileSQL, id, state, size).
+	if !pg.lock.IsFresh() {
+		return result, locklib.ErrLockExpired
+	}
+	err := pg.pool.QueryRow(ctx, updateFileSQL, id, state, size).
 		Scan(
 			&result.ID,
 			&result.UUID,
@@ -68,7 +73,7 @@ ON file.id=v.file_id
 WHERE file.state=1 AND v.file_id IS NULL;
 `
 
-func (pgi *PostgresInterface) GetNotSyncedFiles(ctx context.Context, nodeID int64) ([]File, error) {
+func (pgi *Postgres) GetNotSyncedFiles(ctx context.Context, nodeID int64) ([]File, error) {
 	results := []File{}
 	rows, err := pgi.pool.Query(ctx, getNotSyncedFilesSQL, nodeID)
 	if err != nil {
@@ -92,7 +97,7 @@ FROM file
 WHERE uuid=$1
 `
 
-func (pgi *PostgresInterface) GetFileByUUID(ctx context.Context, uuid string) (File, error) {
+func (pgi *Postgres) GetFileByUUID(ctx context.Context, uuid string) (File, error) {
 	result := File{}
 	err := pgi.pool.QueryRow(ctx, getFileByUUIDSQL, uuid).
 		Scan(
@@ -105,14 +110,13 @@ func (pgi *PostgresInterface) GetFileByUUID(ctx context.Context, uuid string) (F
 	return result, err
 }
 
-
 const getFileByUUIDAndState = `
 SELECT id, uuid, state, size, created_at
 FROM file 
 WHERE uuid=$1 and state=$2
 `
 
-func (pgi *PostgresInterface) GetFileByUUIDAndState(ctx context.Context, uuid string, state int64) (File, error) {
+func (pgi *Postgres) GetFileByUUIDAndState(ctx context.Context, uuid string, state int64) (File, error) {
 	result := File{}
 	err := pgi.pool.QueryRow(ctx, getFileByUUIDSQL, uuid, state).
 		Scan(

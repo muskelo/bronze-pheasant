@@ -47,7 +47,7 @@ func TestStorage(t *testing.T) {
 
 		t.Logf("\tTest %d:\tTest path method", testID)
 		{
-			expected_path := filepath.Join(s.workdir, "files", "3/a/3adc6469-2691-4ba4-8245-94b0c30b15ef")
+			expected_path := filepath.Join(s.Workdir, "files", "3/a/3adc6469-2691-4ba4-8245-94b0c30b15ef")
 			path := s.filePath("3adc6469-2691-4ba4-8245-94b0c30b15ef")
 			require.Equal(t, expected_path, path, "Return not exppected path")
 		}

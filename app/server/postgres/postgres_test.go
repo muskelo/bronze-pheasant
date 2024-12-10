@@ -1,4 +1,4 @@
-package pgi
+package postgres
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 )
 
 func TestPostgresInterface(t *testing.T) {
-	var pgi *PostgresInterface
+	var pgi *Postgres
 
 	t.Cleanup(func() {
 		if pgi != nil {

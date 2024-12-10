@@ -1,33 +1,33 @@
-package pgi
+package postgres
 
 import (
 	"context"
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	locklib "github.com/muskelo/bronze-pheasant/lib/lock"
 )
 
-func New(ctx context.Context, url string) (*PostgresInterface, error) {
+func New(ctx context.Context, url string, lock locklib.Lock) (*Postgres, error) {
 	pool, err := pgxpool.New(ctx, url)
-	return &PostgresInterface{
+	return &Postgres{
 		pool: pool,
+		lock: lock,
 	}, err
 }
 
-type PostgresInterface struct {
+type Postgres struct {
 	pool *pgxpool.Pool
+	lock locklib.Lock
 }
 
-func (pgi *PostgresInterface) Close() {
+func (pgi *Postgres) Close() {
 	pgi.pool.Close()
 }
 
-func (pgi *PostgresInterface) Ping(ctx context.Context) error {
+func (pgi *Postgres) Ping(ctx context.Context) error {
 	return pgi.pool.Ping(ctx)
 }
-
-
-
 
 //===========================================================================
 // GetNodesWithinFile
@@ -44,28 +44,29 @@ type getNodeWithinFileResult struct {
 	AdvertiseAddr string
 }
 
-func (pgi *PostgresInterface) GetNodeWithinFile(ctx context.Context, uuid string) (getNodeWithinFileResult, error) {
+func (pgi *Postgres) GetNodeWithinFile(ctx context.Context, uuid string) (getNodeWithinFileResult, error) {
 	result := getNodeWithinFileResult{}
 	err := pgi.pool.QueryRow(ctx, getNodeWithinFileSQL, uuid).Scan(&result.Name, &result.AdvertiseAddr)
 	return result, err
 }
-
-
 
 // ===========================================================================
 // UpdateNodeAdvertiseAddr
 // ---------------------------------------------------------------------------
 const updateNodeAdvertiseAddrSQL = `UPDATE public.node SET advertise_addr=$1 WHERE id=$2`
 
-func (pgi *PostgresInterface) UpdateNodeAdvertiseAddr(ctx context.Context, nodeID int64, advertiseAddr string) error {
-	commandTag, err := pgi.pool.Exec(ctx, updateNodeAdvertiseAddrSQL, advertiseAddr, nodeID)
+func (pg *Postgres) UpdateNodeAdvertiseAddr(ctx context.Context, nodeID int64, advertiseAddr string) error {
+	if !pg.lock.IsFresh() {
+		return locklib.ErrLockExpired
+	}
+	commandTag, err := pg.pool.Exec(ctx, updateNodeAdvertiseAddrSQL, advertiseAddr, nodeID)
 	if err != nil {
-        return err
-    }
-    if commandTag.RowsAffected() != 1 {
-        return fmt.Errorf("Advertise addr not updated (%v)\n", commandTag.RowsAffected())
-    }
-    return nil
+		return err
+	}
+	if commandTag.RowsAffected() != 1 {
+		return fmt.Errorf("Advertise addr not updated (%v)\n", commandTag.RowsAffected())
+	}
+	return nil
 }
 
 //===========================================================================
@@ -78,9 +79,10 @@ INSERT INTO public.node_file
 VALUES($1, $2);
 `
 
-func (pgi *PostgresInterface) AddFileToNode(ctx context.Context, node_id int64, file_id int64) error {
-	_, err := pgi.pool.Exec(ctx, addFileToNodeSQL, node_id, file_id)
+func (pg *Postgres) AddFileToNode(ctx context.Context, node_id int64, file_id int64) error {
+	if !pg.lock.IsFresh() {
+		return locklib.ErrLockExpired
+	}
+	_, err := pg.pool.Exec(ctx, addFileToNodeSQL, node_id, file_id)
 	return err
 }
-
-

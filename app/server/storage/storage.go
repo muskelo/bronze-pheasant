@@ -6,9 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	locklib "github.com/muskelo/bronze-pheasant/lib/lock"
 )
 
-func NewStorage(workdir string) (*Storage, error) {
+func NewStorage(workdir string, lock locklib.Lock) (*Storage, error) {
 	err := os.Mkdir(workdir, 0770)
 	if err != nil && !os.IsExist(err) {
 		return nil, err
@@ -38,13 +40,15 @@ func NewStorage(workdir string) (*Storage, error) {
 		}
 	}
 	return &Storage{
-        workdir: workdir,
+		workdir: workdir,
+        lock: lock,
 	}, nil
 }
 
 type Storage struct {
-	workdir  string
-	mutex    sync.Mutex
+	workdir string
+	mutex   sync.Mutex
+	lock    locklib.Lock
 }
 
 func (s *Storage) WriteFile(uuid string, src io.Reader) (written int64, err error) {
@@ -53,20 +57,20 @@ func (s *Storage) WriteFile(uuid string, src io.Reader) (written int64, err erro
 	tmpfilePath := s.tmpfilePath(uuid)
 	_, err = os.Stat(filePath)
 	if err == nil {
-        err = os.ErrExist
+		err = os.ErrExist
 		return
 	}
 
 	// save to temp file
 	tmpfile, err := os.OpenFile(tmpfilePath, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0660)
 	if err != nil {
-        err = fmt.Errorf("Failed create tmp file: %v\n", err)
+		err = fmt.Errorf("Failed create tmp file: %v\n", err)
 		return
 	}
 	defer tmpfile.Close()
-    written, err = io.Copy(tmpfile, src)
+	written, err = io.Copy(tmpfile, src)
 	if err != nil {
-        err = fmt.Errorf("Failed write to tmp file: %v\n", err)
+		err = fmt.Errorf("Failed write to tmp file: %v\n", err)
 		return
 	}
 	tmpfile.Close()
@@ -74,13 +78,17 @@ func (s *Storage) WriteFile(uuid string, src io.Reader) (written int64, err erro
 	// mv from tmpdir to datadir
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
+	if !s.lock.IsFresh() {
+		err = locklib.ErrLockExpired
+		return
+	}
 	// prevent overwrite file if datadir
 	_, err = os.Stat(filePath)
 	if err == nil {
-        err = os.ErrExist
+		err = os.ErrExist
 		return
 	}
-    err = os.Rename(tmpfilePath, filePath)
+	err = os.Rename(tmpfilePath, filePath)
 	return
 }
 
@@ -94,17 +102,17 @@ func (s *Storage) ReadFile(uuid string, dst io.Writer) error {
 	return err
 }
 
-func (s *Storage) GetFile(uuid string) (*os.File,error) {
+func (s *Storage) GetFile(uuid string) (*os.File, error) {
 	return os.OpenFile(s.filePath(uuid), os.O_RDONLY, 0660)
 }
 
 func (s *Storage) GetFileSize(uuid string) int64 {
-    fileInfo, err := os.Stat(s.filePath(uuid))
-    if err != nil || fileInfo.IsDir(){
-        return 0
-    } else {
-        return fileInfo.Size()
-    }
+	fileInfo, err := os.Stat(s.filePath(uuid))
+	if err != nil || fileInfo.IsDir() {
+		return 0
+	} else {
+		return fileInfo.Size()
+	}
 }
 
 func (s *Storage) RemoveFile(uuid string) error {
@@ -123,6 +131,9 @@ func (s *Storage) RemoveFile(uuid string) error {
 	// mv from datadir to trashdir
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
+	if !s.lock.IsFresh() {
+		return fmt.Errorf("Lock is expire")
+	}
 	// prevent overwrite file
 	_, err = os.Stat(removedfilePath)
 	if err == nil {

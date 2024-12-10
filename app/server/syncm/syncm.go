@@ -9,29 +9,29 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/muskelo/bronze-pheasant/app/server/log"
-	pgip "github.com/muskelo/bronze-pheasant/app/server/pgi"
+	"github.com/muskelo/bronze-pheasant/app/server/postgres"
 	storagep "github.com/muskelo/bronze-pheasant/app/server/storage"
 	"github.com/sirupsen/logrus"
 )
 
-func New(pgi *pgip.PostgresInterface, storage *storagep.Storage, nodeId int64) *SyncManager {
+func New(pg *postgres.Postgres, storage *storagep.Storage, nodeId int64) *SyncManager {
 	return &SyncManager{
-		pgi:     pgi,
+		pg:     pg,
 		storage: storage,
 		nodeId:  nodeId,
-		log:     log.Logg("syncmanager"),
+		log:     log.G("syncmanager"),
 	}
 }
 
 type SyncManager struct {
-	pgi     *pgip.PostgresInterface
+	pg     *postgres.Postgres
 	storage *storagep.Storage
 	nodeId  int64
 	log     *logrus.Entry
 }
 
 func (sm *SyncManager) run(ctx context.Context) error {
-	files, err := sm.pgi.GetNotSyncedFiles(ctx, sm.nodeId)
+	files, err := sm.pg.GetNotSyncedFiles(ctx, sm.nodeId)
 	if errors.Is(err, pgx.ErrNoRows) {
 		sm.log.Info("Not files to sync")
 		return nil
@@ -41,7 +41,7 @@ func (sm *SyncManager) run(ctx context.Context) error {
 	}
 
 	for _, file := range files {
-		nodes, err := sm.pgi.GetNodesWithinFile(ctx, file.ID)
+		nodes, err := sm.pg.GetNodesWithinFile(ctx, file.ID)
 		if err != nil {
 			sm.log.Errorf("Failed to get the list of nodes within file %v: %v\n. Skip...\n", file.UUID, err)
 			continue
@@ -67,7 +67,7 @@ func (sm *SyncManager) run(ctx context.Context) error {
 			sm.log.Errorf("Failed to write file %v on disk: %v. Skip...\n", file.UUID, err)
 			continue
 		}
-		err = sm.pgi.AddFileToNode(ctx, sm.nodeId, file.ID)
+		err = sm.pg.AddFileToNode(ctx, sm.nodeId, file.ID)
 		if err != nil {
 			return err
 		}

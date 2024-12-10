@@ -1,4 +1,4 @@
-package pgi
+package postgres
 
 import (
 	"context"
@@ -21,7 +21,7 @@ func (node Node) IsExist() bool {
 	return !node.notExist
 }
 
-func (pgi *PostgresInterface) GetNodesWithinFile(ctx context.Context, id int64) ([]Node, error) {
+func (pgi *Postgres) GetNodesWithinFile(ctx context.Context, id int64) ([]Node, error) {
 	const getNodesWithinFileSQL = `
         SELECT node.id, node.name, node.advertise_addr, node.lock
         FROM node JOIN node_file ON node.id=node_file.node_id
@@ -50,7 +50,7 @@ func (pgi *PostgresInterface) GetNodesWithinFile(ctx context.Context, id int64) 
 	return results, nil
 }
 
-func (pgi *PostgresInterface) GetNodeByName(ctx context.Context, name string) (Node, error) {
+func (pgi *Postgres) GetNodeByName(ctx context.Context, name string) (Node, error) {
 	const getNodeByNameSQL = `
         SELECT id, name, advertise_addr, lock 
         FROM public.node 
@@ -71,7 +71,7 @@ func (pgi *PostgresInterface) GetNodeByName(ctx context.Context, name string) (N
 	return result, err
 }
 
-func (pgi *PostgresInterface) CreateNode(ctx context.Context, name string) (Node, error) {
+func (pgi *Postgres) CreateNode(ctx context.Context, name string) (Node, error) {
 	const createNodeSQL = `
         INSERT INTO public.node
         ("name")
@@ -93,7 +93,7 @@ func (pgi *PostgresInterface) CreateNode(ctx context.Context, name string) (Node
 	return result, err
 }
 
-func (pgi *PostgresInterface) TakeNodeLock(ctx context.Context, id int64, lock int64) error {
+func (pgi *Postgres) TakeNodeLock(ctx context.Context, id int64, lock int64) error {
 	const initNodeLockSQL = `
         UPDATE node
         SET lock=$1
@@ -110,7 +110,7 @@ func (pgi *PostgresInterface) TakeNodeLock(ctx context.Context, id int64, lock i
 	return nil
 }
 
-func (pgi *PostgresInterface) UpdateNodeLock(ctx context.Context, id int64, oldLock int64, newLock int64) error {
+func (pgi *Postgres) UpdateNodeLock(ctx context.Context, id int64, oldLock int64, newLock int64) error {
 	const updateNodeLockSQL = `
         UPDATE node
         SET lock=$3
@@ -127,7 +127,7 @@ func (pgi *PostgresInterface) UpdateNodeLock(ctx context.Context, id int64, oldL
 	return nil
 }
 
-func (pgi *PostgresInterface) ReleaseNodeLock(ctx context.Context, id int64, oldLock int64) error {
+func (pgi *Postgres) ReleaseNodeLock(ctx context.Context, id int64, oldLock int64) error {
 	const releaseNodeLockSQL = `
         UPDATE node
         SET lock=0
