@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	uuidp "github.com/google/uuid"
@@ -48,6 +49,7 @@ func uploadFile(nodeID int64, storage *storagep.Storage, pg *postgres.Postgres) 
 			ctx.JSON(400, resp)
 			return
 		}
+        uuid = strings.ToLower(uuid)
 		mr, err := ctx.Request.MultipartReader()
 		if err != nil {
 			resp.Err = err.Error()
@@ -116,6 +118,7 @@ func downloadFile(storage *storagep.Storage, pg *postgres.Postgres) gin.HandlerF
 			ctx.Status(400)
 			return
 		}
+        uuid = strings.ToLower(uuid)
 		if storage.IsFileExist(uuid) {
 			size := storage.GetFileSize(uuid)
 			file, err := storage.GetFile(uuid)
