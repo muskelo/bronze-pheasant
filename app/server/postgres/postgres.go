@@ -2,87 +2,56 @@ package postgres
 
 import (
 	"context"
-	"fmt"
+	"time"
 
+	"github.com/alecthomas/kingpin/v2"
 	"github.com/jackc/pgx/v5/pgxpool"
-	locklib "github.com/muskelo/bronze-pheasant/lib/lock"
 )
 
-func New(ctx context.Context, url string, lock locklib.Lock) (*Postgres, error) {
-	pool, err := pgxpool.New(ctx, url)
-	return &Postgres{
-		pool: pool,
-		lock: lock,
-	}, err
-}
-
 type Postgres struct {
-	pool *pgxpool.Pool
-	lock locklib.Lock
+	pool         *pgxpool.Pool
+	pingInterval time.Duration
 }
 
-func (pgi *Postgres) Close() {
-	pgi.pool.Close()
-}
-
-func (pgi *Postgres) Ping(ctx context.Context) error {
-	return pgi.pool.Ping(ctx)
-}
-
-//===========================================================================
-// GetNodesWithinFile
-//---------------------------------------------------------------------------
-
-const getNodeWithinFileSQL = `
-select node.name, node.advertise_addr
-from file join node_file on file.id=node_file.file_id join node on node_file.node_id=node.id 
-where "uuid"=$1;
-`
-
-type getNodeWithinFileResult struct {
-	Name          string
-	AdvertiseAddr string
-}
-
-func (pgi *Postgres) GetNodeWithinFile(ctx context.Context, uuid string) (getNodeWithinFileResult, error) {
-	result := getNodeWithinFileResult{}
-	err := pgi.pool.QueryRow(ctx, getNodeWithinFileSQL, uuid).Scan(&result.Name, &result.AdvertiseAddr)
-	return result, err
-}
-
-// ===========================================================================
-// UpdateNodeAdvertiseAddr
-// ---------------------------------------------------------------------------
-const updateNodeAdvertiseAddrSQL = `UPDATE public.node SET advertise_addr=$1 WHERE id=$2`
-
-func (pg *Postgres) UpdateNodeAdvertiseAddr(ctx context.Context, nodeID int64, advertiseAddr string) error {
-	if !pg.lock.IsFresh() {
-		return locklib.ErrLockExpired
-	}
-	commandTag, err := pg.pool.Exec(ctx, updateNodeAdvertiseAddrSQL, advertiseAddr, nodeID)
+func (pg *Postgres) Init(ctx context.Context, connstr string, pingInterval time.Duration) error {
+	pool, err := pgxpool.New(ctx, connstr)
 	if err != nil {
 		return err
 	}
-	if commandTag.RowsAffected() != 1 {
-		return fmt.Errorf("Advertise addr not updated (%v)\n", commandTag.RowsAffected())
-	}
+	pg.pool = pool
+	pg.pingInterval = pingInterval
 	return nil
 }
 
-//===========================================================================
-// AddFileToNode
-//---------------------------------------------------------------------------
+func (pg *Postgres) Close() {
+	pg.pool.Close()
+}
 
-const addFileToNodeSQL = `
-INSERT INTO public.node_file
-(node_id, file_id)
-VALUES($1, $2);
-`
+func (pg *Postgres) Ping(ctx context.Context) error {
+	return pg.pool.Ping(ctx)
+}
 
-func (pg *Postgres) AddFileToNode(ctx context.Context, node_id int64, file_id int64) error {
-	if !pg.lock.IsFresh() {
-		return locklib.ErrLockExpired
+func (pg *Postgres) PingLoop(ctx context.Context) error {
+	for {
+		err := pg.Ping(ctx)
+		if err != nil {
+			return err
+		}
+		time.Sleep(pg.pingInterval)
 	}
-	_, err := pg.pool.Exec(ctx, addFileToNodeSQL, node_id, file_id)
-	return err
+}
+
+// Default postgres instace
+
+var (
+	postgresConnstr      = kingpin.Flag("postgres.connstr", "Postgres connection string").Required().String()
+	postgresPingInterval = kingpin.Flag("postgres.ping-interval", "Postgres ping interval").Default("10s").Duration()
+)
+
+var (
+	Default = &Postgres{}
+)
+
+func Init(ctx context.Context) error {
+	return Default.Init(ctx, *postgresConnstr, *postgresPingInterval)
 }

@@ -7,10 +7,11 @@ import (
 	"path/filepath"
 	"sync"
 
-	locklib "github.com/muskelo/bronze-pheasant/lib/lock"
+	"github.com/alecthomas/kingpin/v2"
 )
 
-func NewStorage(workdir string, lock locklib.Lock) (*Storage, error) {
+
+func New(workdir string) (*Storage, error) {
 	err := os.Mkdir(workdir, 0770)
 	if err != nil && !os.IsExist(err) {
 		return nil, err
@@ -41,14 +42,12 @@ func NewStorage(workdir string, lock locklib.Lock) (*Storage, error) {
 	}
 	return &Storage{
 		workdir: workdir,
-        lock: lock,
 	}, nil
 }
 
 type Storage struct {
 	workdir string
 	mutex   sync.Mutex
-	lock    locklib.Lock
 }
 
 func (s *Storage) WriteFile(uuid string, src io.Reader) (written int64, err error) {
@@ -78,10 +77,6 @@ func (s *Storage) WriteFile(uuid string, src io.Reader) (written int64, err erro
 	// mv from tmpdir to datadir
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	if !s.lock.IsFresh() {
-		err = locklib.ErrLockExpired
-		return
-	}
 	// prevent overwrite file if datadir
 	_, err = os.Stat(filePath)
 	if err == nil {
@@ -131,9 +126,6 @@ func (s *Storage) RemoveFile(uuid string) error {
 	// mv from datadir to trashdir
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	if !s.lock.IsFresh() {
-		return fmt.Errorf("Lock is expire")
-	}
 	// prevent overwrite file
 	_, err = os.Stat(removedfilePath)
 	if err == nil {
@@ -157,4 +149,18 @@ func (s *Storage) tmpfilePath(uuid string) string {
 
 func (s *Storage) removedfilePath(uuid string) string {
 	return filepath.Join(s.workdir, "removedfiles", uuid)
+}
+
+// Default storage
+
+var (
+	storageWorkdir = kingpin.Flag("storage.workdir", "Workidr for storage").Required().String()
+)
+
+var Default *Storage
+
+func Init() error {
+	var err error
+	Default, err = New(*storageWorkdir)
+	return err
 }

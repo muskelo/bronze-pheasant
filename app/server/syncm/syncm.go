@@ -2,21 +2,21 @@ package syncm
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/muskelo/bronze-pheasant/app/server/log"
+	"github.com/muskelo/bronze-pheasant/app/server/pglock"
 	"github.com/muskelo/bronze-pheasant/app/server/postgres"
-	storagep "github.com/muskelo/bronze-pheasant/app/server/storage"
+	storagepkg "github.com/muskelo/bronze-pheasant/app/server/storage"
+	"github.com/muskelo/bronze-pheasant/lib/httpclient"
 	"github.com/sirupsen/logrus"
 )
 
-func New(pg *postgres.Postgres, storage *storagep.Storage, nodeId int64) *SyncManager {
+func New(pg *postgres.Postgres, storage *storagepkg.Storage, nodeId int64) *SyncManager {
 	return &SyncManager{
-		pg:     pg,
+		pg:      pg,
 		storage: storage,
 		nodeId:  nodeId,
 		log:     log.G("syncmanager"),
@@ -24,57 +24,71 @@ func New(pg *postgres.Postgres, storage *storagep.Storage, nodeId int64) *SyncMa
 }
 
 type SyncManager struct {
-	pg     *postgres.Postgres
-	storage *storagep.Storage
 	nodeId  int64
+	pg      *postgres.Postgres
+	storage *storagepkg.Storage
 	log     *logrus.Entry
+}
+
+func (sm *SyncManager) syncFile(ctx context.Context, file postgres.File) error {
+	// find nodes where file present
+	nodes, err := sm.pg.GetNodesWithinFileV2(ctx, file.UUID, 1, time.Now().Unix()-pglock.LifetimeSeconds)
+	if err != nil {
+		return fmt.Errorf("Failed to get the list of nodes within file %v: %v\n. Skip...\n", file.UUID, err)
+	}
+	if len(nodes) == 0 {
+		return fmt.Errorf("File %v doesn't present on any active node", file.UUID)
+	}
+
+	// try get file from another nodes
+	var resp *http.Response
+	for _, node := range nodes {
+		tmpResp, err := httpclient.GetV1InternalFiles(node.AdvertiseAddr, file.UUID)
+		if err != nil {
+			return fmt.Errorf("Failed get file %v from node %v: %v\n", file.UUID, node.Name, err)
+		} else {
+			resp = tmpResp
+			break
+		}
+	}
+	if resp == nil {
+		return fmt.Errorf("Failed to download file %v from any node. Skip...", file.UUID)
+	}
+	defer resp.Body.Close()
+
+	// save file localy
+	_, err = sm.storage.WriteFile(file.UUID, resp.Body)
+	if err != nil {
+		return fmt.Errorf("Failed to write file %v on disk: %v. Skip...\n", file.UUID, err)
+	}
+	err = sm.pg.AddFileToNode(ctx, sm.nodeId, file.ID)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (sm *SyncManager) run(ctx context.Context) error {
 	files, err := sm.pg.GetNotSyncedFiles(ctx, sm.nodeId)
-	if errors.Is(err, pgx.ErrNoRows) {
-		sm.log.Info("Not files to sync")
-		return nil
-	}
 	if err != nil {
 		return err
 	}
+	if len(files) == 0 {
+		sm.log.Info("Not files to sync")
+		return nil
+	}
 
 	for _, file := range files {
-		nodes, err := sm.pg.GetNodesWithinFile(ctx, file.ID)
+		err = sm.syncFile(ctx, file)
 		if err != nil {
-			sm.log.Errorf("Failed to get the list of nodes within file %v: %v\n. Skip...\n", file.UUID, err)
-			continue
+			sm.log.Errorf("Sync error: %v", err.Error())
+		} else {
+			sm.log.Printf("Synced %v", file.UUID)
 		}
-
-		var resp *http.Response
-		for _, node := range nodes {
-			tmpResp, err := http.Get(fmt.Sprintf("%v/api/v1/files/%v", node.AdvertiseAddr, file.UUID))
-			if err != nil {
-				sm.log.Errorf("Failed get file %v from node %v: %v\n", file.UUID, node.Name, err)
-			} else {
-				resp = tmpResp
-				break
-			}
-		}
-		if resp == nil {
-			sm.log.Errorf("Failed to download file %v from any node. Skip...", file.UUID)
-			continue
-		}
-
-		_, err = sm.storage.WriteFile(file.UUID, resp.Body)
-		if err != nil {
-			sm.log.Errorf("Failed to write file %v on disk: %v. Skip...\n", file.UUID, err)
-			continue
-		}
-		err = sm.pg.AddFileToNode(ctx, sm.nodeId, file.ID)
-		if err != nil {
-			return err
-		}
-		sm.log.Infof("Synced file %v\n", file.UUID)
 	}
 	return nil
 }
+
 func (sm *SyncManager) Run(ctx context.Context) error {
 	for {
 		err := sm.run(ctx)
@@ -87,4 +101,14 @@ func (sm *SyncManager) Run(ctx context.Context) error {
 		case <-time.After(30 * time.Second):
 		}
 	}
+}
+
+// Default
+
+var (
+	Default *SyncManager
+)
+
+func Init(nodeID int64) {
+	Default = New(postgres.Default, storagepkg.Default, nodeID)
 }
